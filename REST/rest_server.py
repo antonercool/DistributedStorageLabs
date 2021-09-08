@@ -4,6 +4,7 @@ import sqlite3
 import base64
 import string
 import random
+import os
 
 def get_db():
     # Connect to the sqlite DB at 'files.db' and store the connection in 'g.db'
@@ -31,6 +32,7 @@ def write_file(encoded_file):
     f = open(f"Storage/{blop_id}", "wb")
     f.write(base64bytes)
     f.close() 
+
     return blop_id
 
 
@@ -51,7 +53,7 @@ def add_files():
     filename = payload.get('filename')
     content_type = payload.get('content_type')
     # Decode the file contents and calculate its original size
-    file_data = base64.b64decode(payload.get('contents_b64'))
+    file_data = payload.get('contents_b64')
     size = len(file_data)
     # Store the file locally with a random generated name
     blob_name = write_file(file_data)
@@ -66,5 +68,70 @@ def add_files():
     db.commit()
     # Return the ID of the new file record with HTTP 201 (Created) status code
     return make_response({"id": cursor.lastrowid }, 201)
+
+@app.route('/files', methods=['GET'])
+def list_files():
+    # Query the database for all files
+    db = get_db()
+    cursor = db.execute("SELECT * FROM `file`")
+    if not cursor:
+        return make_response({"message": "Error connecting to the database"}, 500)
+    files = cursor.fetchall()
+    # Convert files from sqlite3.Row object (which is not JSON-encodable) to
+    # a standard Python dictionary simply by casting
+    files = [dict(f) for f in files]
+    return make_response({"files": files})
+
+
+from flask import Flask, make_response, g, request, send_file
+...
+@app.route('/files/<int:file_id>', methods=['GET'])
+def download_file(file_id):
+    db = get_db()
+    cursor = db.execute("SELECT * FROM `file` WHERE `id`=?", [file_id])
+    if not cursor:
+        return make_response({"message": "Error connecting to the database"}, 500)
+    f = cursor.fetchone()
+    # Convert to a Python dictionary
+    f = dict(f)
+    print("File requested: {}".format(f))
+    # Return the binary file contents with the proper Content-Type header.
+    return send_file(f"Storage/{f['blob_name']}", mimetype=f['content_type'])
+
+
+@app.route('/files/meta/<int:file_id>', methods=['GET'])
+def meta_data(file_id):
+    db = get_db()
+    cursor = db.execute("SELECT * FROM `file` WHERE `id`=?", [file_id])
+    if not cursor:
+        return make_response({"message": "Error connecting to the database"}, 500)
+    f = cursor.fetchone()
+    # Convert to a Python dictionary
+    f = dict(f)
+    print( f['size'] )
+    return make_response({"size": f"{f['size']}" })    
+
+
+def remove_file(filename):
+    os.remove(f"Storage/{filename}")
+    return "File deleted"
+ 
+ 
+@app.route('/files/<int:file_id>', methods=['DELETE'])
+def delete_file(file_id):
+    db = get_db()
+    cursor = db.execute("SELECT * FROM file WHERE id=?", [file_id])
+    if not cursor:
+       return make_response({"message": "Error connecting to the database"}, 500)
+ 
+    f = cursor.fetchone()
+    # Convert to a Python dictionary 
+    data_dictionary = dict(f)
+    print(f"File delete: {data_dictionary}")
+ 
+    cursor = db.execute("DELETE FROM file WHERE id=?", [file_id])
+    db.commit()
+    # Return the binary file contents with the proper Content-Type header.
+    return remove_file(f"{data_dictionary['blob_name']}")  
 
 app.run(host="localhost", port=9000)
